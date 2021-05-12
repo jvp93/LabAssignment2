@@ -1,0 +1,185 @@
+# Set working directory and load data
+setwd("C:\\Users\\jennypl\\OneDrive - RISE\\Administration\\Kurser\\Quantitative Methods Multivariate Analysis\\Lab 2")
+data <- read.csv2("lab_2_assignment_dataset_2.csv")
+
+# Checking for coding errors -------------------------
+
+# factor variable 1: Sex
+levels(data$sex) # two levels: "female" and "male"
+data$sex_female[data$sex == "female"] = 1
+data$sex_female[data$sex == "male"] = 0
+
+# factor variable 2: Age
+levels(data$age)
+data$age[data$age == "almost 35"] = 35
+data$age <- as.numeric(levels(data$age))[data$age]
+
+# Descriptive statistics ------------------------------
+
+# DV
+plot(density(data$pain), main = "DV: Pain", xlab = "Pain rating scale")
+# IV1
+plot(density(data$age), main = "IV: Age", xlab = "Years")
+# IV2
+plot(density(data$STAI_trait), main = "IV: STAI trait", xlab = "Trait anxiety")
+# IV3
+plot(density(data$pain_cat), main = "IV: Pain catastrophising", xlab = "Pain catastrophising scale") # outlier
+    # After removal of outlier
+    plot(density(data2$pain_cat), main = "IV: Pain catastrophising", xlab = "Pain catastrophising scale") # outlier removed
+# IV4
+plot(density(data$cortisol_serum), main = "IV: Cortisol serum", xlab = "Cortisol level in serum")
+# IV5
+plot(density(data$cortisol_saliva), main = "IV: Cortisol saliva", xlab = "Cortisol level in saliva")
+# IV6
+plot(density(data$mindfulness), main = "IV: Mindfulness", xlab = "Mindful Attention Awareness Scale")
+# IV7
+table(data$sex_female)
+
+# Correlation matrix ---------------------------------
+data_cor <- data[,-c(1,3, 10, 11, 12)]
+
+cor_mat <- cor(data_cor) 
+# Cortisol_serum and cortisol_saliva are too correlated. 
+# As cortisol_serum is more strongly correlated with the DV, I choose to remove cortisol_saliva.
+
+data_cor2 <- data[,-c(1,3,8,10,11,12)]
+
+cor_mat2 <- cor(data_cor2) # better
+
+######### Testing assumptions -----------------------------
+
+# Influential cases (Cook's distance) ------------------------------------------
+# Model 1
+lm1 <- lm(data$pain ~
+            
+          + data$age
+          + data$sex_female
+          + data$STAI_trait
+          + data$pain_cat
+          + data$mindfulness
+          + data$cortisol_serum
+          
+          , data = data, na.action = na.exclude)
+
+summary(lm1) # adjusted r2 = 0.2536
+
+cooks_distance <- cooks.distance(lm1)
+
+# Threshold 4 / (n - k - 1), where n is the sample size and k is the number of independent variables
+cooks_threshold <- 4/(160-6-1)
+
+# Plot all influential cases
+plot(cooks_distance, ylab = "Cook's Distance", main = "Influential Cases")
+abline(h=0.0261, lty = 2, col = "red")
+
+# Plot influential cases with ylim
+plot(cooks_distance, ylab = "Cook's Distance", main = "Influential Cases, ylim = 0.5", ylim = c(0,0.5))
+abline(h=0.0261, lty = 2, col = "red")
+
+# Identify influential cases
+which(cooks_distance > cooks_threshold) # 6 influential cases identified, however, only one that really deviates from the others
+influential <- c(24,35,41,48,79,144)
+
+# Remove influential cases
+data2 <- data[-influential, ]
+
+# Re-run model
+lm2 <- lm(data2$pain ~
+            
+          + data2$age
+          + data2$sex_female
+          + data2$STAI_trait
+          + data2$pain_cat
+          + data2$mindfulness
+          + data2$cortisol_serum
+          
+          , data = data2, na.action = na.exclude)
+
+summary(lm2) # adjusted r2 = 0.4142
+
+# Multicollinearity --------------------------------------
+library(usdm)
+
+data_vif <- data2[, -c(1,3,8,10,11,12)]
+
+vif(data_vif) # The model shows no signs of multicollinearity
+
+# Independence -------------------------------------------
+
+# Durbin-Watson test
+library(lmtest)
+dwtest(lm2) # Durbin-Watson test gives value of 1.69
+
+# Homogeneity of variance --------------------------------
+
+# Plot residuals vs fitted values
+plot(lm2$fitted.values, lm2$residuals, main = "Homogeneity of Variance", xlab = "Fitted values", ylab = "Residuals") # looks random
+
+library(lmtest)
+#perform Breusch-Pagan Test - Nullhypothesis: Homoskedacity is present
+bptest(lm2) # 4.92, not significant
+
+# Linearity ----------------------------------------------
+
+# Age
+plot((data2$age), (data2$pain), xlab = "Age, years", ylab = "Pain rating scale", main = "Age") 
+# Sex
+plot((data2$sex_female), (data2$pain), xlab = "Sex", ylab = "Pain rating scale", main = "Sex") 
+# STAI trait
+plot((data2$STAI_trait), (data2$pain), xlab = "Trait anxiety scale", ylab = "Pain rating scale", main = "STAI trait")
+# pain_cat
+plot((data2$pain_cat), (data2$pain), xlab = "Pain catastrophising scale", ylab = "Pain rating scale", main = "Pain catastrophising")
+# cortisol_serum
+plot((data2$cortisol_serum), (data2$pain), xlab = "Cortisol level in serum", ylab = "Pain rating scale", main = "Cortisol serum") 
+# mindfulness
+plot((data2$mindfulness), (data2$pain), xlab = "Mindful Attention Awareness Scale", ylab = "Pain rating scale", main = "Mindfulness") 
+
+# Normality ------------------------------------------------
+
+pain.stdres = rstandard(lm2)
+
+# Normal probability plot
+qqnorm(pain.stdres) 
+qqline(pain.stdres)
+
+# MLR ------------------------------------------------------
+library(lm.beta)
+
+####### Model 1
+
+lm_1 <- lm(data2$pain ~
+            
+          + data2$age
+          + data2$sex_female
+          # + data2$STAI_trait
+          # + data2$pain_cat
+          # + data2$mindfulness
+          # + data2$cortisol_serum
+          
+          , data = data2, na.action = na.exclude)
+
+summary(lm_1)
+confint(lm_1)
+lm.beta(lm_1)
+AIC(lm_1)
+
+####### Model 2
+
+lm_2 <- lm(data2$pain ~
+            
+          + data2$age
+          + data2$sex_female
+          + data2$STAI_trait
+          + data2$pain_cat
+          + data2$mindfulness
+          + data2$cortisol_serum
+          
+          , data = data2, na.action = na.exclude)
+
+summary(lm_2) 
+confint(lm_2)
+lm.beta(lm_2)
+AIC(lm_2)
+
+# Compare models
+anova(lm_1, lm_2, test = "F")
