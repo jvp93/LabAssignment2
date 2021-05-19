@@ -1,0 +1,296 @@
+# Lab Assignment 3
+setwd("C:\\Users\\jennypl\\OneDrive - RISE\\Administration\\Kurser\\Quantitative Methods Multivariate Analysis\\Lab 3")
+
+install.packages("foreign") 
+library("foreign")
+data <- read.spss("lab_3_assignment_dataset.SAV", to.data.frame = TRUE, reencode = TRUE) # 891 cases
+
+# Data overview and cleaning -----------------------------
+install.packages("Amelia")
+library(Amelia)
+missmap(data, main = "Missing values vs observed") # Does not seem to reflect what I see when scrolling through the dataset
+
+data$Cabin[data$Cabin == "               "] = NA
+
+missmap(data, main = "Missing values vs observed") # Better; missing values in variables Cabin and Age
+
+# I am not interested in Cabin, so I'll remove this variable
+data <- data[,-11]
+
+# Now I'll create a dataset with only complete cases to know what data will actually be in my model
+data <- data[complete.cases(data),] # 714 complete cases
+
+# Descriptvie statistics --------------------------
+
+# DV
+table(data$Survived) # Most people died --> will probably be easier to predict death than survival
+
+# I find the following predictors being of particular interest
+
+# IV1: Class
+plot(density(data$Pclass)) # Most people were in class 3
+
+# IV2: Sex
+table(data$Sex) # more men than women
+
+# IV3: Age
+plot(density(data$Age, na.rm = TRUE))
+
+# IV4: Number of siblings/spouses
+plot(density(data$SibSp)) # most have 0 siblings/spouses, quite many have 1
+
+# IV5: Number of parents/children
+plot(density(data$Parch)) # most have 0 parents/children, some have 1 or 2
+
+# DV and IVs -----------------------------
+
+tablePclass <- xtabs(~ data$Pclass + data$Survived)
+prop.table(tablePclass, 1)
+# 65.59% survived in class 1
+# 47.98% survived in class 2
+# 23.94% survived in class 3
+##### Appears to be a rather linear correlation, no variable transformation needed
+
+tableSex <- xtabs(~ data$Sex + data$Survived)
+prop.table(tableSex, 1)
+# 75.48% of females survived
+# 20.53% of males survived
+##### Sex will likely be an important predictor
+
+data$Age_group[data$Age < 19] = "Child"
+data$Age_group[data$Age > 18 & data$Age < 61] = "Adult"
+data$Age_group[data$Age > 60] = "Elderly"
+tableAge_group <- xtabs(~ data$Age_group + data$Survived)
+prop.table(tableAge_group, 1)
+# Child    0.5035971
+# Adult    0.3887884
+# Elderly  0.2272727
+##### Survival rate seems to linearly decrease with age
+
+tableSibSp <- xtabs(~ data$SibSp + data$Survived)
+prop.table(tableSibSp, 1)
+#### Survival rate at different levels of siblings/spouses
+# 0  0.3715499
+# 1  0.5300546
+# 2  0.4400000
+# 3  0.3333333
+# 4  0.1666667
+# 5  0.0000000
+##### Number of siblings/spouses appear to be correlated to survival rate in an inverted U-shape; 
+# perhaps square this variable?
+
+tableParch <- xtabs(~ data$Parch + data$Survived)
+prop.table(tableParch, 1)
+# data$Parch         0         1
+# 0  0.3570058
+# 1  0.5545455
+# 2  0.5735294
+# 3  0.6000000
+# 4  0.0000000
+# 5  0.2000000
+# 6  0.0000000
+##### Appears to be a positive correlation up until a number of 3 parents/children --> inverted U-shape; Square variable?
+
+# Interactions and feature engineering --------------------------------
+
+# As sex appears to be an important predictor, I investigate if it has any interaction with another important predictor, namely age
+male <- subset.data.frame(data, data$Sex == "male  ")
+tableAge_group_male <- xtabs(~ male$Age_group + male$Survived)
+prop.table(tableAge_group_male, 1)
+# Child    0.3380282 survived
+# Adult    0.1845730 survived
+# Elderly  0.1052632 survived
+##### For men, there appears to be a negative correlation between age and survival
+
+female <- subset.data.frame(data, data$Sex == "female")
+tableAge_group_female <- xtabs(~ female$Age_group + female$Survived)
+prop.table(tableAge_group_female, 1)
+# Child    0.6764706 survived
+# Adult    0.7789474 survived
+# Elderly  1.0000000 survived
+##### For women, there appears to be a positive correlation between age and survival
+
+# As the correlation between age and survival is dependent on sex, I create an interaction variable
+# Dummy-code sex for interaction variable
+data$Sex_dummy[data$Sex == "male  "] = 0
+data$Sex_dummy[data$Sex == "female"] = 1
+
+data$Age_sex <- data$Age * data$Sex_dummy
+
+# Apart from the interaction between sex and age, we know that two groups were particularily protected: Women and children
+# I thus feature engineer a variable that describes whether a person was in this prioritised group or not
+# This variable is useful for predicting survival, which most likely will be more difficult than predicting death
+data$Prioritised <- 0
+data$Prioritised[data$Sex == "female" | data$Age < 15] = 1
+table_prioritised <- xtabs(~ data$Prioritised + data$Survived)
+prop.table(table_prioritised, 1)
+# Not prioritised  0.1739130 survived
+# Prioritised 0.7266667 survived
+##### We see that among prioritised, 73% survived, while only 17% of non-prioritised survived
+
+
+# Due to the U-shaped correlation between number of siblings/spouses and survival,
+# this variable will be centred and squared
+mean_SibSp <- mean(data$SibSp)
+data$SibSp_centred_sq <- (data$SibSp - mean_SibSp)^2
+
+# Due to the U-shaped correlation between number of parents/children and survival,
+# this variable will be centred and squared
+mean_Parch <- mean(data$Parch)
+data$Parch_centred_sq <- (data$Parch - mean_Parch)^2
+
+
+# Remove influential cases (due to suspisious pattern in Parch) -----------------
+log_mod <- glm(data$Survived ~
+                 
+               + data$Pclass
+               + data$Parch
+               + data$Parch_centred_sq
+               + data$SibSp
+               + data$SibSp_centred_sq
+               + data$Age
+               + data$Sex_dummy
+               + data$Age_sex
+               + data$Prioritised
+               
+               
+               , family=binomial(link='logit'), data = data)
+
+# Model statistics
+summary(log_mod) # AIC 613.33
+
+# Calculate Cook's distances
+cooks_distance <- cooks.distance(log_mod)
+
+# Threshold 4 / (n - k - 1), where n is the sample size and k is the number of independent variables
+cooks_threshold <- 4/(714-9-1)
+
+# Plot all influential cases
+plot(cooks_distance, ylab = "Cook's Distance", main = "Influential Cases")
+abline(h=0.00568, lty = 2, col = "red")
+
+# Identify influential cases
+which(cooks_distance > cooks_threshold) # 26 influential cases identified, however, none above 0.05
+influential <- c(23,52,66,143,164,189,206,211,216,241,272,291,333,337,386,397,450,452,466,492,499,522,526,583,617,683)
+
+# Remove influential cases
+data <- data[-influential, ] # 688 cases
+
+# Run model again
+log_mod2 <- glm(data$Survived ~
+                  
+                + data$Pclass
+                + data$Parch
+                + data$Parch_centred_sq
+                + data$SibSp
+                + data$SibSp_centred_sq
+                + data$Age
+                + data$Sex_dummy
+                + data$Age_sex
+                + data$Prioritised
+                
+                
+                , family=binomial(link='logit'), data = data)
+
+# Model statistics
+summary(log_mod2) # AIC 500.42, i.e. 
+# The model now performed significantly better. 
+
+# VIFs -----------------------------------
+library(usdm)
+
+data_vif <- data[, -c(1,2,4,5,9,10,11,12,18,19)]
+
+vif(data_vif)
+# Logistic regression model -----------------------------
+
+# Null model -------------------------------
+null_mod <- glm(data$Survived ~ 1,family=binomial(link='logit'), data = data)
+summary(null_mod) # AIC = 966.52
+library(lmtest)
+lrtest(null_mod) # Chi2 test statistic = 0
+install.packages("pscl")
+library(pscl)
+pR2(null_mod) # McFadden 0.000
+
+# Overall accuracy
+data$fitted.results_null <- predict(null_mod,data,type='response')
+data$fitted.results_null <- ifelse(data$fitted.results_null > 0.5,1,0)
+misClasificError_null <- mean(data$fitted.results_null != data$Survived, na.rm=TRUE)
+print(paste('Accuracy',1-misClasificError_null))
+# Accuracy 0.60029
+test <- which(data$Survived == 1)
+
+# Specific accuracy for the two categories
+glm_null <- xtabs(~ data$fitted.results_null + data$Survived)
+prop.table(glm_null, 2)
+
+
+# Logistic regression model ----------------------------
+log_mod <- glm(data$Survived ~
+                 
+               + data$Pclass
+               + data$Parch
+               + data$Parch_centred_sq
+               + data$SibSp
+               + data$SibSp_centred_sq
+               + data$Age
+               + data$Sex_dummy
+               + data$Age_sex
+               + data$Prioritised
+               
+               
+               , family=binomial(link='logit'), data = data)
+
+# Model statistics
+summary(log_mod) # AIC 500.42
+
+install.packages("pscl")
+library(pscl)
+pR2(log_mod) # McFadden 0.4811
+
+library(lmtest)
+lrtest(log_mod) # Chi2 = 445.48, p-value = 0.000
+
+# Coefficients
+exp(log_mod$coefficients)         # exponentiated coefficients
+exp(confint(log_mod))             # 95% CI for exponentiated coefficients
+anova(log_mod, test="Chisq")    # Chi2-test statistics for individual predictors
+
+# Overall accuracy of model
+data$fitted.results <- predict(log_mod,data,type='response')
+data$fitted.results <- ifelse(data$fitted.results > 0.5,1,0)
+misClasificError <- mean(data$fitted.results != data$Survived, na.rm=TRUE)
+print(paste('Accuracy',1-misClasificError))
+# Accuracy 0.8474
+
+# Specific accuracy for the two categories
+glm2 <- xtabs(~ data$fitted.results + data$Survived)
+prop.table(glm2, 2)
+# Accuracy not_survived 0.8862
+# Accuracy survived 0.7891
+
+# Calculating probability of survival
+#Kate without Leonardo: 3.37-(1.54*3)+(0.324*1)-(0.211*(1-0.432)^2)-(0.443*0)-(0.361*(0-0.513)^2)-(0.0518*20)-(1.24*1)+(0.0292*(20*1))+(3.89*1)
+# log(odds) =  1.108922
+# p = 0.7519281
+
+#Kate with Leonardo: 3.37-(1.54*3)+(0.324*1)-(0.211*(1-0.432)^2)-(0.443*1)-(0.361*(1-0.513)^2)-(0.0518*20)-(1.24*1)+(0.0292*(20*1))+(3.89*1)
+# log(odds) = 0.6753083
+# p = 0.6626908
+
+# Sue without Leonardo: 3.37-(1.54*3)+(0.324*1)-(0.211*(1-0.432)^2)-(0.443*0)-(0.361*(0-0.513)^2)-(0.0518*4)-(1.24*1)+(0.0292*(4*1))+(3.89*1)
+# log(odds) = 1.470522
+# p = 0.8131367
+
+# Sue with Leonardo: 3.37-(1.54*3)+(0.324*2)-(0.211*(2-0.432)^2)-(0.443*0)-(0.361*(0-0.513)^2)-(0.0518*4)-(1.24*1)+(0.0292*(4*1))+(3.89*1)
+# log(odds) = 1.343826
+# p = 0.7931184
+
+# Testing linearity of logodds with and without squaring of predictors
+logodds <- log_mod$linear.predictors
+plot(logodds ~ data$SibSp)
+plot(logodds ~ data$SibSp_centred_sq)
+
+plot(logodds ~ data$Parch)
+plot(logodds ~ data$Parch_centred_sq)
