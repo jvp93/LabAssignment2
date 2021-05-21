@@ -1,0 +1,129 @@
+# Lab Assignment 4
+setwd("C:\\Users\\jennypl\\OneDrive - RISE\\Administration\\Kurser\\Quantitative Methods Multivariate Analysis\\Lab 4")
+
+install.packages("foreign") 
+library("foreign")
+data <- read.spss("lab_4_assignment_dataset_A.SAV", to.data.frame = TRUE, reencode = TRUE) # 200 cases
+
+# Checking for coding errors -------------------------
+
+# factor variable 1: Sex
+levels(data$sex) # three levels: "female", "male  " and "man   "
+data$sex_female[data$sex == "female"] = 1
+data$sex_female[data$sex == "male  "] = 0
+data$sex_female[data$sex == "man   "] = 0
+
+install.packages("Amelia")
+library(Amelia)
+missmap(data, main = "Missing values vs observed") # No missing values
+
+# Descriptive statistics ------------------------------
+
+# DV
+hist((data$pain), main = "DV: Pain", xlab = "Pain rating scale", breaks = 10) # A bit skewed
+# IV1
+table(data$sex_female) # 93 men, 197 women
+# IV2
+hist((data$age), main = "IV: Age", xlab = "Years", breaks = 10) # Quite normally distributed
+# IV3
+hist((data$STAI_trait), main = "IV: STAI trait", xlab = "Trait anxiety")
+# IV4
+hist((data$pain_cat), main = "IV: Pain catastrophising", xlab = "Pain catastrophising scale") 
+# IV5
+hist((data$mindfulness), main = "IV: Mindfulness", xlab = "Mindful Attention Awareness Scale", breaks = 8)
+# IV6
+hist((data$cortisol_serum), main = "IV: Cortisol serum", xlab = "Cortisol level in serum", breaks = 12) # A bit skewed
+
+# Remove influential cases to optimise model -----------------------
+
+model_test1 <- lmer(pain ~ 
+                
+                + age
+              + sex_female
+              + STAI_trait
+              + pain_cat
+              + mindfulness
+              + cortisol_serum
+              
+              + (1|hospital), data=data, REML=FALSE)
+
+summary(model_test1)
+cooks_distance <- cooks.distance(model_test1)
+
+# Threshold 4 / (n - k - 1), where n is the sample size and k is the number of independent variables
+cooks_threshold <- 4/(200-6-1)
+above_threshold <- which(cooks_distance > cooks_threshold) # 38 cases...
+
+plot(cooks_distance, ylab = "Cook's Distance", main = "Influential Cases")
+abline(h=0.05, lty = 2, col = "red")
+
+# Identify influential cases
+which(cooks_distance > 0.05) # 12 influential cases identified
+influential <- c(4,15,27,50,75,92,146,147,190,194,198,200)
+
+# Remove influential cases
+data2 <- data[-influential, ] # 188 cases
+
+# Re-run model
+model_test2 <- lmer(pain ~ 
+                   
+                   + age
+                 + sex_female
+                 + STAI_trait
+                 + pain_cat
+                 + mindfulness
+                 + cortisol_serum
+                 
+                 + (1|hospital), data=data2, REML=FALSE)
+
+summary(model_test2) 
+
+# Mixed model --------------------------------
+
+install.packages("nlme")
+library(nlme)
+library(lme4)
+install.packages("lmerTest")
+
+model <- lmer(pain ~ 
+               
+                + age
+              + sex_female
+              + STAI_trait
+              + pain_cat
+              + mindfulness
+              + cortisol_serum
+
+              + (1|hospital), data=data2, REML=FALSE)
+
+summary(model)
+
+library(MuMIn)
+r.squaredGLMM(model)
+
+confint(model)
+
+library(insight)
+Vf = var(predict(model,re.form=NA)) # 0.739
+
+# Making predictions for dataset B -------------------------------------
+
+dataB <- read.spss("lab_4_assignment_dataset_B.SAV", to.data.frame = TRUE, reencode = TRUE) # 200 cases
+
+# Check data 
+library(Amelia)
+missmap(dataB, main = "Missing values vs observed") # No missing values
+
+# factor variable 1: Sex
+levels(dataB$sex) # two levels; recode to dummy variable to match the developed model
+dataB$sex_female[dataB$sex == "female"] = 1
+dataB$sex_female[dataB$sex == "male  "] = 0
+
+# Make predictions (without random effects)
+dataB$predictions <- predict(model, newdata = dataB, re.form=NA)
+
+# Calculate r2
+r2_dataB <- cor(dataB$pain, dataB$predictions)^2
+RSS <- sum((dataB$pain-dataB$predictions)^2)
+TSS <- sum((mean(dataB$pain)-dataB$pain)^2)
+r2_dataB_manual <- 1-(RSS/TSS)
