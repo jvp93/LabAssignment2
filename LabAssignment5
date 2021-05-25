@@ -1,0 +1,48 @@
+# Lab Assignment 5 -----------------------------
+setwd("C:\\Users\\jennypl\\OneDrive - RISE\\Administration\\Kurser\\Quantitative Methods Multivariate Analysis\\Lab 5")
+
+library("foreign")
+data <- read.spss("lab_5_assignment_dataset.SAV", to.data.frame = TRUE, reencode = TRUE) # 20 observations
+
+# Convert from wide to long dataframe ----------------
+library(reshape2)
+
+data2 <- melt(data,
+                  # ID variables - all the variables to keep but not split apart on
+                  id.vars=c("ID", "sex", "age", "STAI_trait", "pain_cat", "cortisol_serum", "mindfulness"),
+                  # The source columns
+                  measure.vars=c("pain1", "pain2", "pain3", "pain4"),
+                  # Name of the destination column that will identify the original
+                  # column that the measurement came from
+                  variable.name="day",
+                  value.name="pain")
+
+# Recode day variable
+data2$day <- as.character(data2$day)
+data2$day[data2$day == "pain1"] = 1
+data2$day[data2$day == "pain2"] = 2
+data2$day[data2$day == "pain3"] = 3
+data2$day[data2$day == "pain4"] = 4
+data2$day <- as.numeric(data2$day)
+
+library(nlme)
+library(lme4)
+library(cAIC4)
+
+# Model 1: Random intercept model
+model_int <- lmer(pain ~ sex + age + STAI_trait + pain_cat + mindfulness 
+                  + cortisol_serum + day + (1|ID), data=data2, REML=FALSE)
+summary(model_int)
+cAIC(model_int) # 204.15
+AIC(model_int) # 217.02
+
+data2$pred_int <- predict(model_int, re.form=NA)
+
+# Model 2: Random intercept and Random slope Model
+model_slope <- lmer(pain ~ sex + age + STAI_trait + pain_cat + mindfulness 
+                    + cortisol_serum + day + (1 + day|ID), data=data2, REML=FALSE)
+summary(model_slope)
+cAIC(model_slope) # 162.32
+AIC(model_slope) # 204.44
+
+data2$pred_slope <- predict(model_slope, re.form=NA)
