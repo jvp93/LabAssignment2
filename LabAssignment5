@@ -1,0 +1,192 @@
+# Lab Assignment 5 -----------------------------
+setwd("C:\\Users\\jennypl\\OneDrive - RISE\\Administration\\Kurser\\Quantitative Methods Multivariate Analysis\\Lab 5")
+
+library("foreign")
+data <- read.spss("lab_5_assignment_dataset.SAV", to.data.frame = TRUE, reencode = TRUE) # 20 observations
+
+# Convert from wide to long dataframe ----------------
+library(reshape2)
+
+data2 <- melt(data,
+                  # ID variables - all the variables to keep but not split apart on
+                  id.vars=c("ID", "sex", "age", "STAI_trait", "pain_cat", "cortisol_serum", "mindfulness"),
+                  # The source columns
+                  measure.vars=c("pain1", "pain2", "pain3", "pain4"),
+                  # Name of the destination column that will identify the original
+                  # column that the measurement came from
+                  variable.name="day",
+                  value.name="pain")
+
+# Recode day variable
+data2$day <- as.character(data2$day)
+data2$day[data2$day == "pain1"] = 1
+data2$day[data2$day == "pain2"] = 2
+data2$day[data2$day == "pain3"] = 3
+data2$day[data2$day == "pain4"] = 4
+data2$day <- as.numeric(data2$day)
+
+library(nlme)
+library(lme4)
+library(cAIC4)
+
+# Model 1: Random intercept model --------------------------
+model_int <- lmer(pain ~ sex + age + STAI_trait + pain_cat + mindfulness 
+                  + cortisol_serum + day + (1|ID), data=data2, REML=FALSE)
+summary(model_int)
+AIC(model_int) # 218.76
+
+data2$pred_int <- predict(model_int, re.form=NA)
+
+# Model 2: Random intercept and Random slope Model ------------------
+model_slope <- lmer(pain ~ sex + age + STAI_trait + pain_cat + mindfulness 
+                    + cortisol_serum + day + (1 + day|ID), data=data2, REML=FALSE)
+summary(model_slope)
+AIC(model_slope) # 204.44
+
+data2$pred_slope <- predict(model_slope, re.form=NA)
+
+# Export data to Excel
+setwd("C:\\Users\\jennypl\\OneDrive - RISE\\Administration\\Kurser\\Quantitative Methods Multivariate Analysis\\Lab 5")
+write.csv2(data2, file = "data_int_slope.csv")
+
+# After visual analysis, I conclude that model_int and model_slope are so similar 
+# that I prefer sticking to the simpler model, although the AIC was lower in the more complex model
+
+# Model 3: Including quadratic term of time --------------------------
+
+data2$day_centred <- data2$day - mean(data2$day)
+
+data2$day_centred_sq <- data2$day_centred^2
+
+model_int_sq <- lmer(pain ~ sex + age + STAI_trait + pain_cat + mindfulness 
+                    + cortisol_serum + day_centred + day_centred_sq + (1|ID), data=data2, REML=FALSE)
+summary(model_int_sq)
+confint(model_int_sq)
+AIC(model_int_sq) # 215.04
+
+data2$pred_int_sq <- predict(model_int_sq, re.form=NA)
+
+# Export data to Excel
+setwd("C:\\Users\\jennypl\\OneDrive - RISE\\Administration\\Kurser\\Quantitative Methods Multivariate Analysis\\Lab 5")
+write.csv2(data2, file = "data_int_slope_sq.csv")
+
+# Testing assumptions --------------------------------
+data2$ID <- as.character(data2$ID)
+data2$ID[data2$ID == "ID_1 "] = 1
+data2$ID[data2$ID == "ID_2 "] = 2
+data2$ID[data2$ID == "ID_3 "] = 3
+data2$ID[data2$ID == "ID_4 "] = 4
+data2$ID[data2$ID == "ID_5 "] = 5
+data2$ID[data2$ID == "ID_6 "] = 6
+data2$ID[data2$ID == "ID_7 "] = 7
+data2$ID[data2$ID == "ID_8 "] = 8
+data2$ID[data2$ID == "ID_9 "] = 9
+data2$ID[data2$ID == "ID_10"] = 10
+data2$ID[data2$ID == "ID_11"] = 11
+data2$ID[data2$ID == "ID_12"] = 12
+data2$ID[data2$ID == "ID_13"] = 13
+data2$ID[data2$ID == "ID_14"] = 14
+data2$ID[data2$ID == "ID_15"] = 15
+data2$ID[data2$ID == "ID_16"] = 16
+data2$ID[data2$ID == "ID_17"] = 17
+data2$ID[data2$ID == "ID_18"] = 18
+data2$ID[data2$ID == "ID_19"] = 19
+data2$ID[data2$ID == "ID_20"] = 20
+data2$ID[is.na(data2$ID)] = 2
+
+data2$ID <- as.factor(data2$ID)
+
+# Influential outliers ------------------
+library(influence.ME)
+infl_cluster <- influence(model_int_sq, group = "ID")
+infl_obs <- influence(model_int_sq, obs=TRUE)
+
+cd_cluster <- cooks.distance.estex(infl_cluster)
+plot(cd_cluster, ylab = "Cook's Distance", main = "Influence of participants (clusters)")
+
+cd_obs <- cooks.distance.estex(infl_obs)
+plot(cd_obs, ylab = "Cook's Distance", main = "Influence of observations")
+
+# Normality of residuals -----------
+
+####### All
+resid <- residuals(model_int_sq, type = "pearson")
+
+data2$resid <- resid
+hist(data2$resid, breaks = 11, xlab = "Residuals", main = "Distribution of residuals")
+
+# Normal probability plot
+qqnorm(resid) 
+qqline(resid)
+
+# Skewness and Kurtosis
+library(moments)
+skewness(resid) # 0.192
+kurtosis(resid) # 2.84
+
+####### Clusters
+
+library(data.table)
+Table_skew <- setkey(setDT(data2), ID)[,list(skewness=skewness(resid)), by=list(ID)] # All values between -1 and 1
+
+Table_kurt <- setkey(setDT(data2), ID)[,list(skewness=kurtosis(resid)), by=list(ID)] # Max value 2.23
+
+# Linearity ---------------
+
+plot(data2$pred_int_sq, data2$resid, xlab = "Predicted values", ylab = "Residuals", main = "Linearity") # Linear
+
+plot(data2$age, data2$resid, xlab = "Age", ylab = "Residuals", main = "Linearity") # quite linear
+
+plot(data2$STAI_trait, data2$resid, xlab = "STAI trait", ylab = "Residuals", main = "Linearity") # linear
+
+plot(data2$pain_cat, data2$resid, xlab = "Pain catastrophising", ylab = "Residuals", main = "Linearity") # linear
+
+plot(data2$mindfulness, data2$resid, xlab = "Mindfulness", ylab = "Residuals", main = "Linearity") # linear
+
+plot(data2$cortisol_serum, data2$resid, xlab = "Serum cortisol", ylab = "Residuals", main = "Linearity") # linear
+
+plot(data2$day_centred, data2$resid, xlab = "Day centered", ylab = "Residuals", main = "Linearity") # not linear (hockey-stick)
+
+plot(data2$day_centred_sq, data2$resid, xlab = "Day centered squared", ylab = "Residuals", main = "Linearity") # only 2 values --> linear?
+
+# Homoskedacity -------------
+
+plot(data2$pred_int_sq, resid, xlab = "Predicted values", ylab = "Residuals", main = "Homoskedacity") # no sign of heteroscedacity
+
+# Multicollinearity -------------
+data$sex_dummy[data$sex == "male  "] = 0
+data$sex_dummy[data$sex == "female"] = 1
+
+data_cor <- data[,-c(1:6,11,13,14,15)]
+
+cor_mat <- cor(data_cor) # no correlation above 0.7
+
+# Fixed predictors only
+data_cor2 <- data2[,-c(1,2,8:10,11,14,15,16)]
+data_cor2$ID <- as.numeric(data_cor2$ID)
+cor_mat2 <- cor(data_cor2) # no correlation above 0.7
+
+# Constant variance of residuals across clusters-------------
+data2$resid_sq <- (data2$resid)^2
+
+assum <- lm(resid_sq ~ ID, data = data2, na.action = na.exclude)
+
+summary(assum) # Model is not significant, i.e. constant variance of residuals across clusters
+anova(assum, test = "F")
+library(lmtest)
+lrtest(assum) 
+# Normal distribution of random effects -----------------------
+
+random_int <- ranef(model_int_sq)
+random_int_data <- as.data.frame(random_int)
+hist(random_int_data$condval, breaks = 10, xlab = "Random intercept", main = "Distribution of random intercepts") # Looks rather normally distributed
+
+skewness(random_int_data$condval) # 0.01415 --> OK
+kurtosis(random_int_data$condval) # 3.776 ---> a bit high
+
+# Normal probability plot
+qqnorm(random_int_data$condval) 
+qqline(random_int_data$condval)
+
+# Dependency structure of random effects --------------------------
+# Not needed as we only have one random effect in the model
