@@ -1,0 +1,133 @@
+# Lab Assignment 6 -----------------------------
+setwd("C:\\Users\\jennypl\\OneDrive - RISE\\Administration\\Kurser\\Quantitative Methods Multivariate Analysis\\Lab 6")
+
+library("foreign")
+data <- read.spss("lab_6_assignment_dataset.SAV", to.data.frame = TRUE, reencode = TRUE) # 154 observations
+
+library(Amelia)
+missmap(data, main = "Missing values vs observed") # Some missing values
+
+data <- data[complete.cases(data),] # 149 observations
+
+# Checking the data --------------------------
+
+sapply(data, class) # All variables are numerical
+sapply(data, range) # All ARS data ranges between 1-5 (some only 1-4, but there is nothing strange with that); sex varies 1-2, party varies 1-4; and liberal varies 1-5.
+
+cor_mat <- cor(data)
+
+# 1) Assumption checks ----------------------------------
+
+#### No multivariate outliers
+
+data_ars <- data[,c(1:28)]
+
+data_ars$maha_dist <- mahalanobis(data_ars, colMeans(data_ars), cov(data_ars))
+
+data_ars$maha_p_value <- pchisq(data_ars$maha_dist, df=28, lower.tail=FALSE)
+
+which(data_ars$maha_p_value < 0.001) # 5 outliers
+
+mult_out <- c(35,93,104,114,128)
+
+data_ars <- data_ars[-mult_out, ] # 144 observations
+
+#### Multivariate normality
+
+install.packages("MVN")
+library(MVN)
+
+install.packages("ICS")
+library(ICS)
+
+mvnorm.kur.test(data_ars[,1:28])
+mvnorm.skew.test(data_ars[,1:28])
+
+install.packages("mvnormtest")
+library(mvnormtest)
+
+data_ars_cor <- data_ars[,c(1:28)]
+matrix <- matrix(data_ars[,c(1:28)], nrow = 144, ncol = 28)
+matrix <- as.matrix(data_ars[,c(1:28)])
+matrix_t <- t(matrix)
+mshapiro.test(matrix_t) # W is significant and above 0.05 (0.758), i.e., this assumption is met
+
+#### Factorability
+
+install.packages("REdaS")
+library(REdaS)  # KMO 0.860; AR28 and AR 18 have lowest KMOs
+
+#### Linearity: neglected
+
+# 2) Factor extraction ----------------------------------
+
+##### Scree plot with parallel abalysis
+install.packages("nFactors")
+library(nFactors)
+ev <- eigen(cor(data_ars[,c(1:28)])) # get eigenvalues
+ap <- parallel(subject=nrow(data_ars[,c(1:28)]),var=ncol(data_ars[,c(1:28)]),
+               rep=1000,cent=.05)
+nS <- nScree(x=ev$values, aparallel=ap$eigen$qevpea)
+plotnScree(nS, legend = TRUE, ylab = "Eigenvalues", xlab = "Components") # extract 2 factors
+
+
+##### Factor rotation
+install.packages("psych")
+library(psych)
+
+install.packages("GPArotation")
+library(GPArotation)
+
+# 2 factors - no rotation
+fa_test <- fa(data_ars_cor, nfactors = 2, rotate = "none", oblique.scores = FALSE)
+fa_test$values # Eigen values of the common factor solution (post-extraction)
+fa_test$e.values # Eigen values of the original matrix (pre-extraction)
+fa_test$communality # Communality estimates for each item. These are merely the sum of squared factor loadings for that item.
+mean(fa_test$communality) # 0.3463629
+print.psych(fa_test, cut=.2, sort = TRUE)
+print.psych(fa_test, sort = TRUE)
+print.psych(fa_test, cut=.4, sort = TRUE)
+
+# 2 factors - oblique promax rotation; this rotation significantly improves distinguishabiloity between factors
+fa_test <- fa(data_ars_cor, nfactors = 2, rotate = "promax", oblique.scores = TRUE)
+fa_test$values # Eigen values of the common factor solution (post-extraction)
+fa_test$e.values # Eigen values of the original matrix (pre-extraction)
+fa_test$communality # Communality estimates for each item. These are merely the sum of squared factor loadings for that item.
+mean(fa_test$communality) # 0.3463629
+print.psych(fa_test, cut=.2, sort = TRUE)
+print.psych(fa_test, sort = TRUE)
+print.psych(fa_test, cut=.4, sort = TRUE)
+
+############## 2 factors - removed some predictors (make sure that each communality >0.5 and main loading >|0.4|) - LEADING SOLUTION?
+data_ars_cor2 <- data_ars[,-c(1,8,11,14,16,22,24,28:30)] # removed Qs not related to research/diet
+fa_test <- fa(data_ars_cor2, nfactors = 2, rotate = "promax", oblique.scores = TRUE)
+fa_test$values # Eigen values of the common factor solution (post-extraction)
+fa_test$e.values # Eigen values of the original matrix (pre-extraction)
+fa_test$communality # Communality estimates for each item. These are merely the sum of squared factor loadings for that item.
+mean(fa_test$communality) # 0.4104652
+print.psych(fa_test, cut=.2, sort = TRUE)
+print.psych(fa_test, sort = TRUE)
+
+
+# Linear regression --------------------------
+pred <- predict.psych(fa_test, data_ars[,-c(1,8,11,14,16,22,24,28:30)])
+
+mult_out <- c(35,93,104,114,128)
+
+data_reg <- data[-mult_out, ]
+
+data_reg <- cbind(data_reg, pred)
+names(data_reg)[32] <- paste("Animal_research")
+names(data_reg)[33] <- paste("Vegetarianism_veganism")
+
+lm1 <- lm(liberal ~
+            
+            + Animal_research
+          + Vegetarianism_veganism
+          
+          , data = data_reg, na.action = na.exclude )
+
+summary(lm1)
+
+library(lm.beta)
+lm.beta(lm1)
